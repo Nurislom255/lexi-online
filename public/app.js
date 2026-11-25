@@ -29,6 +29,7 @@ let stream = null;         // EventSource
 let deadline = 0;          // local time when the current timer runs out
 let lastChallengeShown = null;
 let lastRevealShown = null;
+let logOpen = false;       // phones: is the game log panel open?
 const prevScores = {};
 
 // What the player has picked on their turn (only in this browser)
@@ -360,9 +361,20 @@ function renderTable() {
   if (c && (state.phase === "challenge" || state.phase === "reveal")) center.append(renderDuel(c, defending));
 
   // --- log ---
-  const log = el("aside", { class: "log", "aria-label": "Game log" },
-    el("h2", null, "Table talk"),
-    el("ol", null, state.log.map((l) => el("li", null, l.text))));
+  const closeLog = () => { logOpen = false; render(); };
+  const log = el("aside", { class: "log" + (logOpen ? " open" : ""), "aria-label": "Game log" },
+    el("div", { class: "log-head" },
+      el("h2", null, "Table talk"),
+      el("button", { class: "log-close", onclick: closeLog, "aria-label": "Close the game log" }, "Close")),
+    el("ol", null, state.log.map((l) => el("li", null, l.text))),
+    el("button", { class: "btn btn-quiet log-leave", onclick: () => {
+      if (confirm("Leave this game? Your seat will be marked as away.")) { logOpen = false; leaveTable(); }
+    } }, "Leave game"));
+  const lastEvent = state.log.length ? state.log[state.log.length - 1].text : "";
+  const ticker = el("p", { class: "ticker", "aria-hidden": "true" }, lastEvent);
+  const logToggle = el("button", { class: "log-toggle", onclick: () => { logOpen = !logOpen; render(); },
+    "aria-label": "Show the game log", "aria-expanded": String(logOpen),
+    html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>' });
 
   // --- my hand ---
   const cards = state.hand.map((card, i) => {
@@ -395,7 +407,7 @@ function renderTable() {
     const chosen = state.hand.find((x) => x.id === pick.cardId);
     const power = state.hand.find((x) => x.id === pick.powerId);
     const ready = chosen && pick.targetId;
-    actions = el("div", { class: "actions" },
+    actions = el("div", { class: "actions throw-actions" },
       el("p", null, chosen ? "Throwing “" + chosen.word + "”" + (power ? " with " + power.name : "") : "No card picked yet"),
       el("button", { class: "btn", disabled: !ready, onclick: async () => {
         const ok = await act("throw", { cardId: pick.cardId, targetId: pick.targetId, powerId: pick.powerId });
@@ -404,7 +416,7 @@ function renderTable() {
   } else if (defending && state.hand.some((x) => x.power === "peek") && !c.peekUsed) {
     actions = el("div", { class: "actions" }, el("p", null, "Stuck? Tap your Peek card to cross out two wrong answers."));
   } else {
-    actions = el("div", { class: "actions" }, el("button", { class: "btn btn-quiet", onclick: () => {
+    actions = el("div", { class: "actions" }, el("button", { class: "btn btn-quiet leave-btn", onclick: () => {
       if (confirm("Leave this game? Your seat will be marked as away.")) leaveTable();
     } }, "Leave game"));
   }
@@ -417,7 +429,8 @@ function renderTable() {
     el("div", { class: "hand", role: "group", "aria-label": "Your hand" }, cards),
     actions);
 
-  const children = [el("div", { class: "opponents" }, opponents), center, log, mine];
+  const children = [el("div", { class: "opponents" }, opponents, logToggle), ticker, center, log, mine];
+  if (logOpen) children.push(el("div", { class: "sheet-backdrop", onclick: closeLog }));
   if (state.phase === "ended") children.push(renderEnd());
   app.replaceChildren(el("section", { class: "table" }, children));
 }
@@ -465,7 +478,7 @@ function renderDuel(c, defending) {
         onclick: () => act("answer", { choice: o.id }) }, o.text);
     }));
 
-  const side = el("div", { style: "display:grid;gap:0.9rem;justify-items:center" }, names);
+  const side = el("div", { class: "duel-side" }, names);
   if (c.power) side.append(el("span", { class: "badge", title: c.power.text }, el("span", { html: ICONS[c.power.id] }), c.power.name + ": " + c.power.text));
   side.append(answers);
 
@@ -512,7 +525,7 @@ function render() {
     return;
   }
   history.replaceState(null, "", "/?code=" + state.code);
-  if (state.phase === "lobby") renderLobby();
+  if (state.phase === "lobby") { logOpen = false; renderLobby(); }
   else renderTable();
   tick();
 }
@@ -532,6 +545,11 @@ function tick() {
   });
 }
 setInterval(tick, 100);
+
+// Escape closes the game log panel on phones.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && logOpen) { logOpen = false; render(); }
+});
 
 async function start() {
   try {
